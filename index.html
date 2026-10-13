@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Painel KN — Operação Meli</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Onest:wght@400;500;600&display=swap">
+<script>try{if(localStorage.getItem("kn-painel-tema")==="claro")document.documentElement.setAttribute("data-tema","claro")}catch(e){}</script>
+<style>
+/* Mesmo visual do Painel KN, com menu lateral translúcido: apps numerados e telas do Diarista aninhadas */
+:root{
+  --bg:#07090d; --ink:#eef2f5; --muted:#8c97a3; --line:rgba(255,255,255,.09);
+  --accent:#4cc3ff; --wash:rgba(255,255,255,.045); --navbg:rgba(7,9,13,.82);
+  --pill:#eef2f5; --on-pill:#000; --grain:rgba(255,255,255,.035); --a1:.10; --a2:.16; --a3:.3;
+  --frame:#0d1117; color-scheme:dark;
+}
+html[data-tema="claro"]{
+  --bg:#f4f8fc; --ink:#082b4a; --muted:#647e95; --line:#d7e5f1;
+  --accent:#0b7fe8; --wash:rgba(8,43,74,.05); --navbg:rgba(255,255,255,.9);
+  --pill:#082b4a; --on-pill:#fff; --grain:rgba(8,43,74,.05); --a1:.07; --a2:.07; --a3:.08;
+  --frame:#ffffff; color-scheme:light;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font-family:Onest,system-ui,sans-serif;overflow:hidden}
+.aurora{position:fixed;inset:0;pointer-events:none;overflow:hidden}
+.aurora i{position:absolute;border-radius:50%;filter:blur(60px)}
+.aurora i:nth-child(1){width:46vw;height:46vw;left:-12vw;top:-14vw;background:#0e6d9c;opacity:var(--a1)}
+.aurora i:nth-child(2){width:38vw;height:38vw;right:-10vw;top:18vh;background:#b86b12;opacity:var(--a2)}
+.aurora i:nth-child(3){width:50vw;height:40vw;left:30vw;bottom:-22vw;background:#123f7a;opacity:var(--a3)}
+.grain{position:fixed;inset:0;pointer-events:none;background-image:radial-gradient(var(--grain) 1px,transparent 1px);background-size:22px 22px}
+.wrap{position:relative;height:100%;display:grid;grid-template-columns:240px 1fr;padding-top:env(safe-area-inset-top,0px)}
+aside{min-height:0;display:flex;flex-direction:column;gap:18px;padding:18px 12px;background:var(--navbg);border-right:1px solid var(--line);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);overflow-y:auto}
+.logo{all:unset;cursor:pointer;display:flex;align-items:center;gap:8px;padding:4px 10px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent)}
+.logo b{font-family:Unbounded,system-ui,sans-serif;font-size:14px;font-weight:700;letter-spacing:-.01em}
+.logo span{color:var(--muted);font-weight:500;font-family:Onest,system-ui,sans-serif}
+.rot{font-size:11px;text-transform:uppercase;letter-spacing:.16em;color:var(--muted);font-weight:600;padding:0 12px;margin:0}
+.menu{display:flex;flex-direction:column;gap:3px}
+.item{all:unset;cursor:pointer;display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:14px;font-size:14px;font-weight:500;color:var(--muted);transition:background .2s,color .2s}
+.item:hover{color:var(--ink);background:var(--wash)}
+.item .n{font-family:Unbounded,system-ui,sans-serif;font-size:10px;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--wash);flex-shrink:0}
+.item[aria-current="true"]{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--ink);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 35%,transparent)}
+.item[aria-current="true"] .n{background:var(--accent);color:var(--bg)}
+.subs{display:flex;flex-direction:column;gap:2px;margin:4px 0 6px 23px;padding-left:12px;border-left:1px solid var(--line)}
+.subs[hidden]{display:none}
+.subs button{all:unset;cursor:pointer;padding:7px 10px;border-radius:10px;font-size:13px;color:var(--muted);transition:color .2s,background .2s}
+.subs button:hover{color:var(--ink);background:var(--wash)}
+.subs button[aria-current="true"]{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);font-weight:600}
+.item:focus-visible,.subs button:focus-visible,.logo:focus-visible,.round:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pe{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 12px 0;border-top:1px solid var(--line)}
+.pe .h{font-family:Unbounded,system-ui,sans-serif;font-size:15px;font-variant-numeric:tabular-nums}
+.pe .d{font-size:11.5px;color:var(--muted);margin-top:2px}
+.round{all:unset;cursor:pointer;flex-shrink:0;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:var(--wash);color:var(--muted);font-size:15px}
+.round:hover{color:var(--ink)}
+main{position:relative;min-height:0;min-width:0}
+iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:var(--frame);display:none}
+iframe.show{display:block}
+.loading{position:absolute;inset:0;display:none;place-items:center;color:var(--muted);font-size:14px}
+.loading.show{display:grid}
+@media (max-width:760px){
+  .wrap{grid-template-columns:1fr;grid-template-rows:auto 1fr}
+  aside{flex-direction:row;align-items:center;gap:8px;padding:8px 12px;border-right:0;border-bottom:1px solid var(--line);overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+  aside::-webkit-scrollbar{display:none}
+  .rot,.pe .txt,.logo span{display:none}
+  .menu{flex-direction:row}
+  .item{padding:7px 11px;font-size:13px;white-space:nowrap}
+  .subs{flex-direction:row;margin:0;padding-left:8px}
+  .subs button{white-space:nowrap}
+  .pe{margin:0;padding:0;border:0}
+}
+</style>
+</head><body>
+<div class="aurora"><i></i><i></i><i></i></div><div class="grain"></div>
+<div class="wrap">
+  <aside aria-label="Apps">
+    <button class="logo" type="button" id="logo" title="KN · Operação"><span class="dot"></span><b>KN<span> · Operação</span></b></button>
+    <p class="rot">Apps</p>
+    <nav class="menu" id="menu"></nav>
+    <div class="pe">
+      <div class="txt"><div class="h" id="hora">--:--</div><div class="d" id="data"></div></div>
+      <div style="display:flex;gap:6px">
+        <button class="round" id="recarregar" type="button" title="Recarregar este app" aria-label="Recarregar este app">↻</button>
+        <button class="round" id="novaAba" type="button" title="Abrir este app em outra aba" aria-label="Abrir este app em outra aba">↗</button>
+        <button class="round" id="tema" type="button"></button>
+      </div>
+    </div>
+  </aside>
+  <main id="main"><div class="loading" id="loading">Abrindo app…</div></main>
+</div>
+<script>
+const APPS=[
+  {id:"diarista",nome:"Diarista",url:"https://megakn.github.io/Controle-de-Diarista-KN/"},
+  {id:"lenel",nome:"Cadastro Lenel",url:"cadastro-lenel.html#banco"},
+  {id:"qr",nome:"QR Login/Lenel",url:"qr-login-lenel.html"},
+  {id:"faltantes",nome:"Análise dos Faltantes",url:"https://megakn.github.io/controle-faltantes/"},
+  {id:"d1",nome:"Dashboard D-1",url:"https://kuehne2027.github.io/Ps-Dashbord/"},
+  {id:"atribuicoes",nome:"Atribuições",url:"https://kuehne2027.github.io/Atribuicao/"},
+  {id:"presenca",nome:"Presença Online",url:"presenca-online.html"},
+  {id:"reserva",nome:"Presença KN Reserva",url:"presenca-reserva.html"}
+];
+const $=id=>document.getElementById(id);
+const frames={};
+let atual=null;
+function renderMenu(){
+  $("menu").innerHTML=APPS.map((a,i)=>`<button class="item" type="button" data-id="${a.id}" aria-current="${a.id===atual}"><span class="n">${i+1}</span>${a.nome}</button>`).join("");
+  const ativo=$("menu").querySelector('.item[aria-current="true"]');ativo&&ativo.scrollIntoView({block:"nearest",inline:"nearest"});
+}
+$("menu").addEventListener("click",e=>{const it=e.target.closest("[data-id]");if(it)abrir(it.dataset.id)});
+function urlNova(u){try{const x=new URL(u,location.href);x.searchParams.set("_kn",Date.now());return x.href}catch(e){return u}}
+function abrir(id){
+  atual=id;renderMenu();
+  Object.values(frames).forEach(f=>f.classList.remove("show"));
+  try{localStorage.setItem("kn-painel-app",id)}catch(e){}
+  if(frames[id]){frames[id].classList.add("show");return}
+  carregar(id);
+}
+function carregar(id){
+  const app=APPS.find(a=>a.id===id);
+  if(frames[id])frames[id].remove();
+  $("loading").classList.add("show");
+  const f=document.createElement("iframe");
+  f.title=app.nome;
+  f.setAttribute("allow","camera *; microphone *; clipboard-read *; clipboard-write *; fullscreen *; geolocation *");
+  f.addEventListener("load",()=>$("loading").classList.remove("show"),{once:true});
+  f.src=urlNova(app.url);
+  $("main").appendChild(f);frames[id]=f;f.classList.add("show");
+}
+$("recarregar").onclick=()=>{if(atual)carregar(atual)};
+$("novaAba").onclick=()=>{const app=APPS.find(a=>a.id===atual);if(app)window.open(new URL(app.url,location.href).href,"_blank","noopener")};
+$("logo").onclick=()=>abrir(APPS[0].id);
+function tema(){const c=document.documentElement.getAttribute("data-tema")==="claro";$("tema").textContent=c?"☾":"☀";$("tema").setAttribute("aria-label",c?"Usar versão escura":"Usar versão clara")}
+$("tema").onclick=()=>{const c=document.documentElement.getAttribute("data-tema")!=="claro";if(c)document.documentElement.setAttribute("data-tema","claro");else document.documentElement.removeAttribute("data-tema");try{localStorage.setItem("kn-painel-tema",c?"claro":"escuro")}catch(e){}tema()};
+function tick(){const d=new Date();$("hora").textContent=d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});$("data").textContent=d.toLocaleDateString("pt-BR",{weekday:"short",day:"2-digit",month:"short"})}
+tema();tick();setInterval(tick,30000);
+let ini=APPS[0].id;try{const s=localStorage.getItem("kn-painel-app");if(APPS.some(a=>a.id===s))ini=s}catch(e){}
+abrir(ini);
+</script>
+</body></html>
