@@ -1526,6 +1526,64 @@ function renderControle(c){
 // Área separada de Faltas/ABS: informação distinta da distribuição MELI/KN, com filtro de
 // período próprio (padrão: hoje). Lançamento rápido — só a quantidade total do dia, sem
 // cadastro por diarista.
+/* ===================== ABS AUTOMÁTICO DA PLANILHA (só nesta cópia do painel novo) =====================
+   Usa o mesmo serviço da planilha Headcount que o app Atribuições já usa: para cada dia,
+   a planilha devolve a lista de ABS (F e AT da aba Presença KN), lendo todas as linhas.
+   O número aparece sozinho na coluna ABS. Dia que a planilha não responder continua com o campo de digitar. */
+const ABS_SVC_PADRAO = {url:'https://script.google.com/macros/s/AKfycbxH6CD_BsLIHcel7mn_LLz5H2eoiGCb-tigI6LOfnH7SspMw9AM5B2dDqtwK3KqbJ3-nA/exec', chave:'kn2026cobertura'};
+const ABS_PLANILHA = {};              // {'2026-10-12': {n:7, em:Date}}
+const ABS_PEDIDOS = {};
+let ABS_STATUS = {ok:null, erro:''};
+async function absSvcCfg(){
+  try{
+    const r = await fetch('https://cjentqthseecgizptyqe.supabase.co/rest/v1/svc_shared_state?state_key=eq.escpainel:planilha&select=payload',{headers:{apikey:'sb_publishable_ca35t-HrAIN5fpJk45P8FQ_10xWlHIV'}});
+    const d = await r.json(); const c = d && d[0] && d[0].payload;
+    if(c && c.url) return c;
+  }catch(e){}
+  return ABS_SVC_PADRAO;
+}
+function absJsonp(u){
+  return new Promise((ok,no)=>{
+    const cb='knabs'+Date.now().toString(36)+Math.floor(Math.random()*1e4);
+    const sc=document.createElement('script');
+    const tm=setTimeout(()=>{fim();no(new Error('a planilha demorou para responder'))},45000);
+    function fim(){clearTimeout(tm);try{delete window[cb]}catch(e){window[cb]=undefined}sc.remove()}
+    window[cb]=d=>{fim();ok(d)};
+    sc.onerror=()=>{fim();no(new Error('não deu para falar com a planilha'))};
+    sc.src=u+'&callback='+cb; document.head.appendChild(sc);
+  });
+}
+async function absBuscarDia(iso, forcar){
+  const c = ABS_PLANILHA[iso];
+  if(!forcar && c && Date.now()-c.em < 2*60*1000) return c.n;
+  if(ABS_PEDIDOS[iso]) return ABS_PEDIDOS[iso];
+  ABS_PEDIDOS[iso] = (async()=>{
+    try{
+      const cfg = await absSvcCfg();
+      const u = cfg.url.trim()+(cfg.url.includes('?')?'&':'?')+'data='+iso+'&chave='+encodeURIComponent(cfg.chave||'');
+      const r = await absJsonp(u);
+      if(!r || !r.ok) throw new Error((r && r.erro) || 'a planilha não respondeu');
+      const n = Array.isArray(r.abs) ? r.abs.length : 0;
+      ABS_PLANILHA[iso] = {n, em:Date.now()}; ABS_STATUS = {ok:true, erro:'', em:new Date()};
+      return n;
+    }catch(e){ ABS_STATUS = {ok:false, erro:e.message||'erro', em:new Date()}; return null; }
+    finally{ delete ABS_PEDIDOS[iso]; }
+  })();
+  return ABS_PEDIDOS[iso];
+}
+async function absBuscarDias(datas, forcar){ await Promise.all(datas.map(d=>absBuscarDia(d, forcar))); }
+function absDoDia(dataISO){
+  const c = ABS_PLANILHA[dataISO];
+  if(c) return {valor:c.n, planilha:true};
+  const dd = distDia(dataISO); return {valor: dd?(dd.abs||0):0, planilha:false};
+}
+function absStatusHTML(){
+  const s = ABS_STATUS;
+  if(s.ok===null) return '<span class="muted">Buscando o ABS na planilha Headcount…</span>';
+  if(s.ok) return `<span style="color:#16A34A;font-weight:600;">● ABS automático da planilha Headcount</span> <span class="muted">(F + AT da aba Presença KN · atualizado às ${s.em.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})})</span>`;
+  return `<span style="color:#DC2626;font-weight:600;">● Não consegui ler o ABS da planilha</span> <span class="muted">(${esc(s.erro)}). Enquanto isso, dá para digitar à mão.</span>`;
+}
+
 function renderAbsPanel(c){
   const state = renderAbsPanel._state || {ini: todayISO(), fim: todayISO()};
   renderAbsPanel._state = state;
@@ -1544,6 +1602,7 @@ function renderAbsPanel(c){
       <div class="field mb0"><label>Até</label><input type="date" id="aFim" value="${state.fim}"></div>
       <button class="btn secondary sm" id="aExportXlsx" style="align-self:end;">⬇ Exportar Excel (fatura)</button>
     </div>
+    <div id="aAbsStatus" style="font-size:12px;margin:-4px 0 12px;"></div>
     <div class="table-wrap" id="aTable"></div>
   `;
   c.appendChild(panel);
@@ -1556,8 +1615,8 @@ function renderAbsPanel(c){
       <tbody>${datas.length?datas.map(d=>{
         const regs = registrosDoDia(d);
         const totalDia = regs.length;
-        const dd = distDia(d);
-        const abs = dd?(dd.abs||0):0;
+        const absInfo = absDoDia(d);
+        const abs = absInfo.valor;
         return regs.map((h,idx)=>{
           const cad = (h.diarista_id && DIARISTAS.find(x=>x.id===h.diarista_id)) || findDiaristaByCPF(h.cpf) || {};
           const groot = h.groot_id || cad.groot_id || '';
@@ -1568,14 +1627,24 @@ function renderAbsPanel(c){
           return `<tr class="${idx===0?'abs-date-start':''}">
             <td>${esc(groot)}</td><td><strong>${esc(nome)}</strong></td><td>${esc(empresa)}</td><td>${esc(cargo)}</td><td>${esc(escala)}</td>
             <td>${fmtDateBR(d)}</td><td><strong>${totalDia}</strong></td>
-            <td>${idx===0?`<input type="number" min="0" class="abs-input" data-data="${d}" value="${abs}" style="width:64px;">`:`<span class="muted">${abs}</span>`}</td>
+            <td>${idx===0?(absInfo.planilha?`<input type="number" class="abs-input" value="${abs}" readonly title="Vem da planilha Headcount" style="width:64px;">`:`<input type="number" min="0" class="abs-input" data-data="${d}" value="${abs}" style="width:64px;">`):`<span class="muted">${abs}</span>`}</td>
           </tr>`;
         }).join('');
       }).join(''):'<tr><td colspan="8" class="muted">Nenhum dado no período selecionado.</td></tr>'}</tbody></table>`;
   }
   draw();
-  document.getElementById('aIni').onchange = e=>{state.ini=e.target.value; draw();};
-  document.getElementById('aFim').onchange = e=>{state.fim=e.target.value; draw();};
+  const absSt = document.getElementById('aAbsStatus');
+  async function absAtualizar(forcar){
+    const datas = Array.from(new Set(HISTORICO.filter(h=>h.data>=state.ini && h.data<=state.fim).map(h=>h.data)));
+    if(!datas.length){ absSt.innerHTML=''; return; }
+    absSt.innerHTML = absStatusHTML();
+    await absBuscarDias(datas, forcar);
+    if(document.body.contains(absSt)){ absSt.innerHTML = absStatusHTML(); draw(); }
+  }
+  absAtualizar(false);
+  const absTimer = setInterval(()=>{ if(!document.body.contains(absSt)){ clearInterval(absTimer); return; } absAtualizar(true); }, 2*60*1000);
+  document.getElementById('aIni').onchange = e=>{state.ini=e.target.value; draw(); absAtualizar(false);};
+  document.getElementById('aFim').onchange = e=>{state.fim=e.target.value; draw(); absAtualizar(false);};
   document.getElementById('aExportXlsx').onclick = ()=> exportControleExcel(state.ini, state.fim);
 }
 
@@ -1629,7 +1698,7 @@ async function exportControleExcel(ini, fim){
   header.eachCell(cell=>{cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF00A3E0'}};cell.alignment={vertical:'middle',horizontal:'center'};});
   let r=5;
   datas.forEach(d=>{
-    const regs=registrosDoDia(d), totalDia=regs.length, dd=distDia(d), abs=dd?(dd.abs||0):0;
+    const regs=registrosDoDia(d), totalDia=regs.length, abs=absDoDia(d).valor;
     regs.forEach((h,idx)=>{
       const cad=(h.diarista_id&&DIARISTAS.find(x=>x.id===h.diarista_id))||findDiaristaByCPF(h.cpf)||{};
       const row=ws.getRow(r++);
