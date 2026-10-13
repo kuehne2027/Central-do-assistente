@@ -88,7 +88,7 @@ iframe.show{display:block}
 </div>
 <script>
 const APPS=[
-  {id:"diarista",nome:"Diarista",url:"https://megakn.github.io/Controle-de-Diarista-KN/"},
+  {id:"diarista",nome:"Diarista",url:"diarista.html"},
   {id:"lenel",nome:"Cadastro Lenel",url:"cadastro-lenel.html#banco"},
   {id:"qr",nome:"QR Login/Lenel",url:"qr-login-lenel.html"},
   {id:"faltantes",nome:"Análise dos Faltantes",url:"https://megakn.github.io/controle-faltantes/"},
@@ -100,11 +100,34 @@ const APPS=[
 const $=id=>document.getElementById(id);
 const frames={};
 let atual=null;
+/* Telas do Diarista: o painel antigo (Central KN) abre sem o menu dele, e as telas ficam aqui no menu da esquerda */
+const SUB={diarista:[["dashboard","Dashboard"],["banco","Banco de Diaristas"],["controle","Controle Diário"]]};
+const subAtual={diarista:"dashboard"};
+try{const v=localStorage.getItem("kn-painel-sub-diarista");if(SUB.diarista.some(x=>x[0]===v))subAtual.diarista=v}catch(e){}
+function irPara(id,alvo){
+  // mesmo aviso que o painel antigo mandava para o Diarista trocar de tela
+  try{frames[id].contentWindow.postMessage({app:"painel-kn",action:"navigate",target:alvo},"*")}catch(e){}
+}
+function esconderMenuAntigo(f){
+  try{
+    const d=f.contentDocument;if(!d||d.getElementById("knPainelNovo"))return;
+    const st=d.createElement("style");st.id="knPainelNovo";
+    st.textContent="#hubSidebar{display:none!important}#hubMain{width:100%!important}";
+    (d.head||d.documentElement).appendChild(st);
+  }catch(e){/* endereço diferente: o navegador não deixa mexer, então o menu antigo continua aparecendo */}
+}
 function renderMenu(){
-  $("menu").innerHTML=APPS.map((a,i)=>`<button class="item" type="button" data-id="${a.id}" aria-current="${a.id===atual}"><span class="n">${i+1}</span>${a.nome}</button>`).join("");
+  $("menu").innerHTML=APPS.map((a,i)=>{
+    const subs=SUB[a.id]&&a.id===atual?`<div class="subs">${SUB[a.id].map(([k,l])=>`<button type="button" data-app="${a.id}" data-alvo="${k}" aria-current="${subAtual[a.id]===k}">${l}</button>`).join("")}</div>`:"";
+    return `<button class="item" type="button" data-id="${a.id}" aria-current="${a.id===atual}"><span class="n">${i+1}</span>${a.nome}</button>${subs}`;
+  }).join("");
   const ativo=$("menu").querySelector('.item[aria-current="true"]');ativo&&ativo.scrollIntoView({block:"nearest",inline:"nearest"});
 }
-$("menu").addEventListener("click",e=>{const it=e.target.closest("[data-id]");if(it)abrir(it.dataset.id)});
+$("menu").addEventListener("click",e=>{
+  const s=e.target.closest("[data-alvo]");
+  if(s){const id=s.dataset.app;subAtual[id]=s.dataset.alvo;try{localStorage.setItem("kn-painel-sub-"+id,s.dataset.alvo)}catch(x){}renderMenu();irPara(id,s.dataset.alvo);return}
+  const it=e.target.closest("[data-id]");if(it)abrir(it.dataset.id);
+});
 function urlNova(u){try{const x=new URL(u,location.href);x.searchParams.set("_kn",Date.now());return x.href}catch(e){return u}}
 function abrir(id){
   atual=id;renderMenu();
@@ -120,7 +143,10 @@ function carregar(id){
   const f=document.createElement("iframe");
   f.title=app.nome;
   f.setAttribute("allow","camera *; microphone *; clipboard-read *; clipboard-write *; fullscreen *; geolocation *");
-  f.addEventListener("load",()=>$("loading").classList.remove("show"),{once:true});
+  f.addEventListener("load",()=>{
+    $("loading").classList.remove("show");
+    if(SUB[id])setTimeout(()=>irPara(id,subAtual[id]),300)
+  });
   f.src=urlNova(app.url);
   $("main").appendChild(f);frames[id]=f;f.classList.add("show");
 }
