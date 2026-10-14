@@ -405,7 +405,7 @@ body.embed::before{display:none}
           <p>Todo mundo que preencheu o formulário. Quem pediu cartão fica como pendente até o setor devolver o número.</p>
         </div>
         <div class="toolbar">
-          <div class="chips" id="bancoChips"><button class="chip on" data-bf="">Todos</button><button class="chip" data-bf="com">Com cartão</button><button class="chip" data-bf="pend">Pendentes</button><button class="chip" data-bf="sem">Sem cartão</button><button class="chip" data-bf="semfoto">Sem foto</button><button class="chip" data-bf="inativos">Inativos</button></div>
+          <div class="chips" id="bancoChips"><button class="chip on" data-bf="">Todos</button><button class="chip" data-bf="com">Com cartão</button><button class="chip" data-bf="pend">Pendentes</button><button class="chip" data-bf="sem">Sem cartão</button><button class="chip" data-bf="semfoto">Sem foto</button></div>
           <input class="search" id="bancoSearch" type="search" placeholder="Buscar nome, Groot ID, CPF, EXT ou cartão">
           <button class="btn primary" id="newPerson">+ Novo cadastro</button>
           <button class="btn" id="pasteBtn">Colar lista</button>
@@ -693,8 +693,8 @@ body.embed::before{display:none}
    CONFIGURAÇÃO — preencha antes de publicar no GitHub Pages
    ================================================================ */
 const CONFIG = {
-  SUPABASE_URL: "https://cjentqthseecgizptyqe.supabase.co",
-  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNqZW50cXRoc2VlY2dpenB0eXFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAxMDY0MTIsImV4cCI6MjEwNTY4MjQxMn0.UWIWzQIEZOWQ2RPOyPmsD3Jo2A6G90W9Rwl1rtEQZv0",      // cole aqui a anon key (Project Settings → API). Vazio = modo demonstração
+  SUPABASE_URL: "https://bkbrmsjwffcfkablpvkr.supabase.co",
+  SUPABASE_ANON_KEY: "sb_publishable_StBcrqGPPNflqnm2e4VeYg_3k5q1ZFz",      // cole aqui a anon key (Project Settings → API). Vazio = modo demonstração
   ADMIN_PIN: "",
   FORM_URL: "https://tinyurl.com/Cadastro-Lenel",   // link que o pessoal recebe (só formulário)
   FORM_ONLY_HOST: ""      // neste endereço o app mostra apenas o formulário               // opcional: PIN para abrir o painel (o formulário público não pede PIN)
@@ -850,11 +850,11 @@ const GROOT_STOP = new Set(["da","de","do","das","dos","e"]);
 const grootToks = k => k.split(" ").filter(t => t && !GROOT_STOP.has(t));
 let GROOT = { raw: null };
 function grootIdx(){
-  const raw = ((typeof S !== "undefined" && S.cfg && S.cfg.groot_lista) || "[]") + "|grupos:" + (window.KN_GRUPOS_VER || 0);
+  const raw = (typeof S !== "undefined" && S.cfg && S.cfg.groot_lista) || "[]";
   if (GROOT.raw === raw) return GROOT;
-  let extra = []; try { extra = JSON.parse((typeof S !== "undefined" && S.cfg && S.cfg.groot_lista) || "[]"); if (!Array.isArray(extra)) extra = []; } catch {}
+  let extra = []; try { extra = JSON.parse(raw); if (!Array.isArray(extra)) extra = []; } catch {}
   const base = GROOT_BASE.split("\n").map(l => { const [g, n, h, e] = l.split("|"); return { g, n, h, e }; });
-  const list = [...base, ...extra, ...(window.KN_GRUPOS_LIVE || [])];
+  const list = [...base, ...extra];
   const cpf = new Map(), row = new Map(), ext = new Map(), nome = new Map(), toks = [];
   for (const r of list) {
     if (!r || !r.g) continue;
@@ -990,6 +990,27 @@ async function fixLegacy(){
 // Fotos: baixadas aos poucos (8 por vez) e só uma vez; baixa de novo só quem teve o cadastro alterado.
 // Estado de cada uma: carregando (sem entrada), com foto, sem foto (d = ""), ou erro (err = true, tenta de novo).
 S.photos = new Map(); let photosBusy = false, photoRetry = null;
+// Cache das fotos no navegador (IndexedDB): cada foto é baixada do banco uma vez por computador
+// e só de novo quando o cadastro muda. Economiza o tráfego do Supabase. Se o navegador não deixar, segue sem cache.
+const PhotoCache = (() => {
+  let dbp = null;
+  const open = () => dbp || (dbp = new Promise(res => {
+    try { const r = indexedDB.open("lenel_fotos", 1); r.onupgradeneeded = () => r.result.createObjectStore("f", { keyPath: "id" }); r.onsuccess = () => res(r.result); r.onerror = () => res(null); r.onblocked = () => res(null); }
+    catch { res(null); }
+  }));
+  return {
+    async getMany(ids){
+      const db = await open(), out = new Map(); if (!db || !ids.length) return out;
+      return new Promise(res => {
+        try {
+          const st = db.transaction("f", "readonly").objectStore("f"); let n = ids.length;
+          ids.forEach(id => { const q = st.get(id); q.onsuccess = () => { if (q.result) out.set(id, q.result); if (--n === 0) res(out); }; q.onerror = () => { if (--n === 0) res(out); }; });
+        } catch { res(out); }
+      });
+    },
+    async putMany(rows){ const db = await open(); if (!db || !rows.length) return; try { const st = db.transaction("f", "readwrite").objectStore("f"); rows.forEach(r => st.put(r)); } catch {} }
+  };
+})();
 const photoOf = c => c ? (c.selfie_data || S.photos.get(c.id)?.d || "") : "";
 const verOf = c => c.updated_at || c.created_at;
 function photoCell(c){
@@ -1002,13 +1023,21 @@ async function loadPhotos(){
   if (photosBusy || !store.photos) return; photosBusy = true;
   let falhou = 0;
   try {
-    const falta = S.cartoes.filter(c => { const e = S.photos.get(c.id); return !e || e.err || e.v !== verOf(c); }).map(c => c.id);
+    let falta = S.cartoes.filter(c => { const e = S.photos.get(c.id); return !e || e.err || e.v !== verOf(c); }).map(c => c.id);
+    if (falta.length) {
+      const byId = new Map(S.cartoes.map(c => [c.id, c]));
+      const cached = await PhotoCache.getMany(falta).catch(() => new Map());
+      falta = falta.filter(id => { const c = byId.get(id), e = cached.get(id); if (c && e && e.v === verOf(c)) { S.photos.set(id, { d: e.d || "", v: e.v }); return false; } return true; });
+      if (S.tab === "banco") renderBanco();
+    }
     for (let i = 0; i < falta.length; i += 8) {
       const lote = falta.slice(i, i + 8);
       try {
         const rows = await store.photos(lote);
         const got = new Map(rows.map(r => [r.id, r.selfie_data || ""]));
-        lote.forEach(id => { const c = S.cartoes.find(x => x.id === id); if (c) S.photos.set(id, { d: got.get(id) || "", v: verOf(c) }); });
+        const salvar = [];
+        lote.forEach(id => { const c = S.cartoes.find(x => x.id === id); if (c) { const e = { d: got.get(id) || "", v: verOf(c) }; S.photos.set(id, e); salvar.push({ id, ...e }); } });
+        PhotoCache.putMany(salvar);
       } catch (e) {
         console.warn("Lote de fotos não carregou", e.message); falhou += lote.length;
         lote.forEach(id => S.photos.set(id, { d: "", v: null, err: true }));
@@ -1111,13 +1140,11 @@ function photoHtml(photo, large = false){
   if (!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(photo || "") || photo.length > 200000) return '<span class="muted">Sem foto</span>';
   return `<img src="${esc(photo)}" alt="Foto do cadastro" style="width:${large ? 160 : 44}px;height:${large ? 180 : 52}px;object-fit:cover;border-radius:10px;display:block" loading="lazy">`;
 }
-/* GRUPOS ao vivo: quem tem cartão e saiu da aba GRUPOS aparece como inativo (nada é apagado). */
-const knInativo = c => { const set = window.KN_GRUPOS_GROOTS; if (!set) return false; const g = String(grootId(c) || "").trim(); return !!g && !set.has(g); };
 function renderBanco(){
   const body = $("#bancoBody");
   if (!S.loaded) { body.innerHTML = skeletonRows(6, 8); return; }
   const q = S.q.trim().toLowerCase(), qd = onlyDigits(q);
-  const rows = [...S.cartoes].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")).filter(c => S.bf === "inativos" ? knInativo(c) : !knInativo(c)).filter(c => !S.bf || S.bf === "inativos" || (S.bf === "semfoto" ? (() => { const e = S.photos.get(c.id); return !c.selfie_data && e && !e.err && e.v === verOf(c) && !e.d; })() : S.bf === "pend" ? /Pendente|setor/.test(bancoStatus(c)) : S.bf === "com" ? !!c.cartao : !c.cartao)).filter(c => !q ||
+  const rows = [...S.cartoes].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")).filter(c => !S.bf || (S.bf === "semfoto" ? (() => { const e = S.photos.get(c.id); return !c.selfie_data && e && !e.err && e.v === verOf(c) && !e.d; })() : S.bf === "pend" ? /Pendente|setor/.test(bancoStatus(c)) : S.bf === "com" ? !!c.cartao : !c.cartao)).filter(c => !q ||
     grootId(c).includes(q) || c.nome.toLowerCase().includes(q) || (c.ext || "").toLowerCase().includes(q) ||
     (qd && (c.cpf.includes(qd) || (c.cartao || "").includes(qd))));
   { const f = photoCounts(); $("#bancoCount").textContent = (q || S.bf ? `${rows.length} de ${S.cartoes.length}` : `${S.cartoes.length} pessoas`) + ` · ${f.com} com foto · ${f.sem} sem foto` + (f.carregando ? ` · carregando ${f.carregando}…` : ""); }
@@ -1125,7 +1152,7 @@ function renderBanco(){
   if (!rows.length) { body.innerHTML = `<tr><td colspan="8"><div class="empty">Nada encontrado para “${esc(S.q)}”.</div></td></tr>`; return; }
   body.innerHTML = rows.map(c => `<tr>
     <td><button class="btn ghost small" data-act="edit" data-id="${esc(c.id)}" aria-label="Abrir cadastro de ${esc(c.nome)}">${photoCell(c)}</button></td>
-    <td class="name">${esc(c.nome)}${knInativo(c) ? ' <span class="pill p-warn">Inativo · fora da GRUPOS</span>' : ""}</td><td class="mono">${esc(grootId(c)) || "Não localizado"}</td>
+    <td class="name">${esc(c.nome)}</td><td class="mono">${esc(grootId(c)) || "Não localizado"}</td>
     <td class="mono">${fmtCpf(c.cpf)}</td>
     <td class="mono">${esc(c.ext) || '<span class="muted">–</span>'}</td>
     <td>${c.cartao ? `<span class="cardno">${esc(c.cartao)}</span>` : ""} ${bancoStatus(c)}</td>
@@ -1815,7 +1842,7 @@ function openPerson(c){
       <div class="toolbar"><button class="btn primary" type="submit">${isNew ? "Adicionar ao banco" : "Salvar alterações"}</button><button class="btn ghost" type="button" data-close>Cancelar</button></div>
     </form>`);
   let editPhotoData = "", editPhotoTask = null, editPhotoError = "", editPhotoVersion = 0;
-  if (!isNew && !photoOf(c) && store.photos) store.photos([c.id]).then(r => { const d = r[0]?.selfie_data || ""; S.photos.set(c.id, { d, v: verOf(c) }); if (!editPhotoData && $("#editPhotoPreview")) $("#editPhotoPreview").innerHTML = photoHtml(d, true); }).catch(() => {});
+  if (!isNew && !photoOf(c) && store.photos) store.photos([c.id]).then(r => { const d = r[0]?.selfie_data || ""; S.photos.set(c.id, { d, v: verOf(c) }); PhotoCache.putMany([{ id: c.id, d, v: verOf(c) }]); if (!editPhotoData && $("#editPhotoPreview")) $("#editPhotoPreview").innerHTML = photoHtml(d, true); }).catch(() => {});
   $("#editPhotoFile").onchange = () => {
     const version = ++editPhotoVersion, file = $("#editPhotoFile").files?.[0];
     editPhotoData = ""; editPhotoError = ""; $("#eErr").textContent = "";
@@ -2015,9 +2042,9 @@ alter table lenel_config  enable row level security;
 grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on lenel_cartoes, lenel_pedidos, lenel_config to anon, authenticated;
 
-create policy "lenel_cartoes_anon" on lenel_cartoes for all to anon using (true) with check (true);
-create policy "lenel_pedidos_anon" on lenel_pedidos for all to anon using (true) with check (true);
-create policy "lenel_config_anon"  on lenel_config  for all to anon using (true) with check (true);
+-- Permissões de acesso devem ser configuradas de forma segura no servidor.
+
+
 
 -- tempo real (pedidos aparecem sem recarregar)
 alter publication supabase_realtime add table lenel_pedidos, lenel_cartoes, lenel_config;`;
@@ -2213,7 +2240,9 @@ function initAdmin(){
   renderAll();
   loadAll(true);
   store.subscribe(() => loadSoon());
-  setInterval(() => { if (!document.hidden) loadAll(); }, DEMO ? 5000 : 20000);
+  // Realtime continua avisando mudanças; verificação de segurança a cada 5 minutos.
+  setInterval(() => { if (!document.hidden) loadAll(); }, DEMO ? 5000 : 300000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) loadSoon(); });
   setInterval(renderKpis, 60000);
 }
 (function boot(){
@@ -2230,124 +2259,6 @@ function initAdmin(){
   };
 })();
 addEventListener("hashchange", () => { if ((!!CONFIG.FORM_ONLY_HOST && location.hostname === CONFIG.FORM_ONLY_HOST)) return; if (location.hash === "#cadastro") location.reload(); else if (!$("#admin").hidden) setTab(location.hash.slice(1)); });
-</script>
-<script>
-/* ===================== KN · LISTA OFICIAL DA ABA GRUPOS =====================
-   Fonte única dos colaboradores: tabela kn_grupos_sync (cópia automática da aba
-   GRUPOS da planilha Headcount - KN 2026, a mesma usada pelo app Atribuições).
-   - Lê a lista quando o app abre.
-   - Fica de olho no "aviso" que a planilha grava a cada edição (escpainel:ping)
-     e relê na hora; além disso, relê a cada 5 minutos.
-   - Só leitura: este bloco nunca grava nada na planilha nem na tabela GRUPOS. */
-(function(){
-  if (window.KNGrupos) return;
-  var BASE = 'https://cjentqthseecgizptyqe.supabase.co/rest/v1/';
-  var KEY = 'sb_publishable_ca35t-HrAIN5fpJk45P8FQ_10xWlHIV';
-  var HEAD = { apikey: KEY };
-  var ouvintes = [], lista = null, assinatura = '', ultimoPing = null, buscando = false;
-
-  function txt(v){ return v == null ? '' : String(v).trim(); }
-  function norm(s){ return txt(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
-  function hhmm(v){
-    // aceita 05:00, 05:00:00, 5:0:0.0, 1899-12-30 5:0:0.0, 05h00
-    var m = txt(v).match(/(?:^|[^\d])(\d{1,2})[:hH](\d{1,2})(?![\d-])/);
-    if (!m) return '';
-    var h = Number(m[1]), mi = Number(m[2]);
-    if (h > 23 || mi > 59) return '';
-    return ('0' + h).slice(-2) + ':' + ('0' + mi).slice(-2);
-  }
-  function campo(r, nomes){ for (var i = 0; i < nomes.length; i++){ var v = r[nomes[i]]; if (v != null && txt(v) !== '') return txt(v); } return ''; }
-  function converter(r){
-    var situacao = campo(r, ['situacao', 'situação', 'status']);
-    return {
-      groot: campo(r, ['groot_id', 'groot']),
-      nome: campo(r, ['nome']),
-      matricula: campo(r, ['matricula']),
-      coordenador: campo(r, ['coordenador', 'gestor']),
-      escala: campo(r, ['escala_descricao']),
-      escalaCodigo: campo(r, ['escala']),
-      turma: campo(r, ['turma']),
-      escalaAntiga: campo(r, ['escala_antiga']),
-      horario: hhmm(campo(r, ['horario'])),
-      horarioCompleto: hhmm(campo(r, ['horario'])) ? hhmm(campo(r, ['horario'])) + ':00' : '',
-      cpf: campo(r, ['cpf']).replace(/\D/g, ''),
-      ext: campo(r, ['ext', 'login']),
-      cargo: campo(r, ['cargo']),
-      sexo: campo(r, ['sexo']),
-      origem: campo(r, ['origem']),
-      tipo: campo(r, ['tipo']),
-      ativo: !situacao || norm(situacao) === 'ativo'
-    };
-  }
-  async function baixar(){
-    var todos = [];
-    for (var ini = 0; ini < 10000; ini += 1000){
-      var r = await fetch(BASE + 'kn_grupos_sync?select=*&order=groot_id.asc&limit=1000&offset=' + ini, { headers: HEAD, cache: 'no-store' });
-      if (!r.ok) throw new Error('GRUPOS HTTP ' + r.status);
-      var d = await r.json();
-      todos.push.apply(todos, d || []);
-      if (!d || d.length < 1000) break;
-    }
-    return todos.map(converter).filter(function(x){ return x.groot && x.nome; });
-  }
-  async function atualizar(forcar){
-    if (buscando) return lista;
-    buscando = true;
-    try{
-      var nova = await baixar();
-      var ativos = nova.filter(function(x){ return x.ativo; });
-      // proteção: uma leitura vazia ou muito pequena nunca derruba a lista dos apps
-      if (ativos.length < 50) throw new Error('lista GRUPOS veio com só ' + ativos.length + ' ativos');
-      var ass = JSON.stringify(nova.map(function(x){ return [x.groot, x.nome, x.escala, x.horario, x.coordenador, x.ext, x.cpf, x.ativo]; }));
-      var mudou = ass !== assinatura;
-      lista = nova; assinatura = ass;
-      KNGrupos.status = { ok: true, em: new Date(), total: ativos.length, erro: '' };
-      if (mudou || forcar) ouvintes.forEach(function(fn){ try{ fn(lista); }catch(e){ console.error('[KN GRUPOS] erro ao aplicar no app:', e); } });
-    }catch(e){
-      KNGrupos.status = { ok: false, em: new Date(), total: lista ? lista.length : 0, erro: e.message || String(e) };
-      console.warn('[KN GRUPOS] não foi possível ler a lista:', e);
-    }finally{ buscando = false; }
-    return lista;
-  }
-  async function conferirAviso(){
-    try{
-      var r = await fetch(BASE + 'svc_shared_state?state_key=eq.escpainel:ping&select=updated_at', { headers: HEAD, cache: 'no-store' });
-      if (!r.ok) return;
-      var d = await r.json(), em = d && d[0] ? d[0].updated_at : null;
-      if (em && ultimoPing !== null && em !== ultimoPing) atualizar();
-      ultimoPing = em || ultimoPing || '';
-    }catch(e){}
-  }
-  var KNGrupos = window.KNGrupos = {
-    status: { ok: null, em: null, total: 0, erro: '' },
-    norm: norm,
-    lista: function(){ return lista; },
-    ativos: function(){ return (lista || []).filter(function(x){ return x.ativo; }); },
-    atualizar: function(){ return atualizar(true); },
-    aoMudar: function(fn){ ouvintes.push(fn); if (lista) { try{ fn(lista); }catch(e){ console.error(e); } } }
-  };
-  function iniciar(){
-    atualizar();
-    conferirAviso();
-    setInterval(conferirAviso, 20000);
-    setInterval(function(){ if (!document.hidden) atualizar(); }, 5 * 60 * 1000);
-    document.addEventListener('visibilitychange', function(){ if (!document.hidden) conferirAviso(); });
-  }
-  if (document.readyState === 'complete') setTimeout(iniciar, 1500);
-  else window.addEventListener('load', function(){ setTimeout(iniciar, 1500); });
-})();
-(function(){
-  function aplicar(){
-    const K = window.KNGrupos; if (!K || !K.lista()) return;
-    const ativos = K.ativos(); if (ativos.length < 50) return;
-    window.KN_GRUPOS_LIVE = ativos.map(g => ({ g: g.groot, n: g.nome, c: g.cpf || "", e: g.ext || "" }));
-    window.KN_GRUPOS_GROOTS = new Set(ativos.map(g => g.groot));
-    window.KN_GRUPOS_VER = (window.KN_GRUPOS_VER || 0) + 1;
-    try { if (typeof renderAll === "function") renderAll(); } catch (e) { console.warn("[KN GRUPOS] Cadastro Lenel:", e); }
-  }
-  const ligar = () => { if (window.KNGrupos) window.KNGrupos.aoMudar(aplicar); };
-  if (document.readyState === "complete") ligar(); else window.addEventListener("load", ligar);
-})();
 </script>
 </body>
 </html>
